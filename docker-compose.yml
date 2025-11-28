@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: foodlens
+      POSTGRES_USER: foodlens_user
+      POSTGRES_PASSWORD: foodlens_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  bot:
+    build: .
+    env_file:
+      - .env
+    depends_on:
+      - db
+
+volumes:
+  db_data:
