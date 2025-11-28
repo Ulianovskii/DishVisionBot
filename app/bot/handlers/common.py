@@ -2,6 +2,8 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from app.services.user_service import get_or_create_user
+
 
 from app.bot.keyboards import main_menu_kb
 from app.bot.states import UserStates
@@ -13,11 +15,17 @@ router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    # 1. Гарантируем, что пользователь есть в БД
+    if message.from_user:
+        await get_or_create_user(message.from_user.id)
+
+    # 2. Ставим базовое состояние и показываем главное меню
     await state.set_state(UserStates.STANDARD)
     await message.answer(
         T.get("send_photo_for_analysis"),
         reply_markup=main_menu_kb(),
     )
+
 
 
 @router.message(Command("help"))

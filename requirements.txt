@@ -6,3 +6,4 @@ asyncpg==0.29.0
 alembic==1.13.3
 openai==1.55.0
 pydantic-settings
+greenlet
