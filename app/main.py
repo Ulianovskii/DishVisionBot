@@ -1,13 +1,22 @@
 import asyncio
 import logging
-from app.db.base import init_db
-
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import settings
-from app.bot.handlers import common, analysis, profile, reports, premium, admin
+from app.db.base import init_db
+
+# роутеры
+from app.bot.handlers import (
+    main_menu,  # ← тут живёт /start + главное меню
+    common,
+    analysis,
+    profile,
+    reports,
+    premium,
+    admin,
+)
 
 
 async def main():
@@ -17,7 +26,8 @@ async def main():
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Регистрируем роутеры
+    # порядок важен: сначала старт/главное меню
+    dp.include_router(main_menu.router)
     dp.include_router(common.router)
     dp.include_router(analysis.router)
     dp.include_router(profile.router)

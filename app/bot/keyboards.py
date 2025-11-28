@@ -4,6 +4,7 @@ from app.locales.ru.buttons import RussianButtons as B
 
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
+    """Главное меню (STATE_STANDARD)"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=B.get("analyze_food"))],
@@ -15,10 +16,12 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=B.get("help"))],
         ],
         resize_keyboard=True,
+        is_persistent=True,
     )
 
 
 def analysis_menu_kb() -> ReplyKeyboardMarkup:
+    """Меню под фото в режиме анализа (STATE_PHOTO_COMMENT)"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -29,6 +32,7 @@ def analysis_menu_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=B.get("back"))],
         ],
         resize_keyboard=True,
+        is_persistent=True,
     )
 
 

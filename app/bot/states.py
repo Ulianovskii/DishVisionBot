@@ -1,15 +1,12 @@
+# app/bot/states.py
 from aiogram.fsm.state import State, StatesGroup
 
 
 class UserStates(StatesGroup):
-    """
-    Основные пользовательские состояния по ТЗ.
-    """
-
-    STANDARD = State()          # Главное меню / базовое состояние
-    PHOTO_COMMENT = State()     # Фото + комментарий, выбор nutrition/recipe
-    PROMO = State()             # Ввод промокода
-    CALORIES_PLAN = State()     # Ввод плана калорий
-    ADMIN = State()             # Главное состояние админ-меню
-    LIMIT_RESET = State()       # Сброс лимитов (админ)
-    PROMO_GENERATE = State()    # Генерация промокодов (админ)
+    STANDARD = State()          # standard_mode
+    PHOTO_COMMENT = State()     # photo_comment_input
+    PROMO = State()             # promo_input
+    CALORIES_PLAN = State()     # calories_plan_input
+    ADMIN = State()             # admin_mode
+    LIMIT_RESET = State()       # limit_reset_input
+    PROMO_GENERATE = State()    # promo_generate_input

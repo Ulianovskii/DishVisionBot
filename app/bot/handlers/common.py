@@ -15,15 +15,14 @@ router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    # 1. Гарантируем, что пользователь есть в БД
+    # создаём пользователя, если нужно
     if message.from_user:
         await get_or_create_user(message.from_user.id)
 
-    # 2. Ставим базовое состояние и показываем главное меню
     await state.set_state(UserStates.STANDARD)
     await message.answer(
         T.get("send_photo_for_analysis"),
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb(),  # <-- здесь клавиатура точно прилетает
     )
 
 
@@ -43,3 +42,16 @@ async def go_back_to_main(message: Message, state: FSMContext):
         "🏠 Главное меню (логика пока в разработке).",
         reply_markup=main_menu_kb(),
     )
+
+@router.message(UserStates.STANDARD)
+async def standard_fallback(message: Message, state: FSMContext):
+    """
+    Любое текстовое сообщение в базовом состоянии,
+    которое не попало в другие хендлеры, возвращает главное меню.
+    """
+    await state.set_state(UserStates.STANDARD)
+    await message.answer(
+        "🏠 Главное меню.",
+        reply_markup=main_menu_kb(),
+    )
+
