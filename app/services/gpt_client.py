@@ -14,7 +14,6 @@ from app.prompts.food_analysis import (
 
 logger = logging.getLogger(__name__)
 
-# Async-клиент OpenAI
 client = AsyncOpenAI(api_key=settings.openai_api_key)
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -22,21 +21,20 @@ AnalysisType = Literal["nutrition", "recipe"]
 
 
 def _get_model_name() -> str:
-    """
-    Если в Settings есть openai_model — используем его, иначе дефолт.
-    """
     return getattr(settings, "openai_model", DEFAULT_MODEL)
 
 
-def _build_user_content(
+def _build_message_content(
     analysis_type: AnalysisType,
     image_bytes: Optional[bytes],
     comment: Optional[str],
 ) -> list[dict]:
     """
-    Собираем content для Responses API:
-    - input_text: инструкция + комментарий пользователя
-    - input_image: фото в base64
+    Контент для user-сообщения в chat.completions:
+    content = [
+      {"type": "text", "text": "..."},
+      {"type": "image_url", "image_url": {"url": "..."}}
+    ]
     """
     if analysis_type == "nutrition":
         base_text = (
@@ -48,6 +46,7 @@ def _build_user_content(
             "Составь подробные рецепты для блюд на фото по инструкциям системного промпта."
         )
 
+    comment = (comment or "").strip()
     if comment:
         text = f"{base_text}\n\nОписание от пользователя:\n{comment}"
     else:
@@ -55,7 +54,7 @@ def _build_user_content(
 
     parts: list[dict] = [
         {
-            "type": "input_text",
+            "type": "text",
             "text": text,
         }
     ]
@@ -64,8 +63,10 @@ def _build_user_content(
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         parts.append(
             {
-                "type": "input_image",
-                "image_url": f"data:image/jpeg;base64,{b64}",
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{b64}",
+                },
             }
         )
 
@@ -78,7 +79,7 @@ async def _call_gpt_with_vision(
     comment: Optional[str],
 ) -> str:
     """
-    Общий вызов Responses API с картинкой + текстом.
+    Вызов chat.completions с картинкой + текстом.
     """
     model = _get_model_name()
     system_prompt = (
@@ -87,48 +88,46 @@ async def _call_gpt_with_vision(
         else SYSTEM_PROMPT_RECIPE
     )
 
-    logger.debug("Calling OpenAI Responses model=%s for %s", model, analysis_type)
+    logger.debug("Calling OpenAI Chat model=%s for %s", model, analysis_type)
 
-    input_messages = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": _build_user_content(analysis_type, image_bytes, comment),
-        },
-    ]
-
-    response = await client.responses.create(
+    response = await client.chat.completions.create(
         model=model,
-        input=input_messages,
+        temperature=0.3,
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": _build_message_content(
+                    analysis_type=analysis_type,
+                    image_bytes=image_bytes,
+                    comment=comment,
+                ),
+            },
+        ],
     )
 
-    # Быстрый путь, если доступен output_text
-    text = getattr(response, "output_text", None)
-    if text:
-        return text
+    content = response.choices[0].message.content
 
-    # Запасной путь — собрать текст вручную
-    output = getattr(response, "output", None)
-    if not output:
-        return ""
+    # content может быть строкой или списком сегментов
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for part in content:
+            if isinstance(part, dict) and "text" in part:
+                chunks.append(str(part["text"]))
+            else:
+                chunks.append(str(part))
+        return "\n".join(chunks)
 
-    chunks: list[str] = []
-    for item in output:
-        if hasattr(item, "content") and item.content:
-            for c in item.content:
-                if hasattr(c, "text") and c.text:
-                    chunks.append(c.text)
-
-    return "\n".join(chunks)
+    return content or ""
 
 
 async def analyze_nutrition(
     image_bytes: Optional[bytes],
     comment: Optional[str],
 ) -> str:
-    """
-    Анализ калорийности по фото + тексту.
-    """
     return await _call_gpt_with_vision("nutrition", image_bytes, comment)
 
 
@@ -136,7 +135,4 @@ async def analyze_recipe(
     image_bytes: Optional[bytes],
     comment: Optional[str],
 ) -> str:
-    """
-    Анализ рецепта по фото + тексту.
-    """
     return await _call_gpt_with_vision("recipe", image_bytes, comment)

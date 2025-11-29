@@ -1,6 +1,8 @@
 # app/bot/handlers/main_menu.py
+
+import logging
+
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
@@ -8,97 +10,81 @@ from app.bot.keyboards import main_menu_kb, analysis_menu_kb
 from app.bot.states import UserStates
 from app.locales.ru.texts import RussianTexts as T
 from app.locales.ru.buttons import RussianButtons as B
-from app.services.user_service import get_or_create_user
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
-@router.message(CommandStart())
+# /start — вход в бота
+@router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    """US1/US2: старт, создание пользователя, главная страница"""
-    if message.from_user:
-        await get_or_create_user(message.from_user.id)
-
     await state.set_state(UserStates.STANDARD)
-
     await message.answer(
-        T.get("send_photo_for_analysis"),
+        T.get("welcome_free"),
         reply_markup=main_menu_kb(),
     )
 
 
-@router.message(F.text == B.get("analyze_food"))
+# Кнопка "📸 Анализировать еду"
+@router.message(UserStates.STANDARD, F.text == B.get("analyze_food"))
 async def on_analyze_food(message: Message, state: FSMContext):
-    """
-    Пользователь нажал '📸 Анализировать еду'
-    Пока без бизнес-логики: просто переводим в STATE_PHOTO_COMMENT
-    и просим отправить фото.
-    """
     await state.set_state(UserStates.PHOTO_COMMENT)
-
     await message.answer(
         T.get("send_photo_for_analysis"),
         reply_markup=analysis_menu_kb(),
     )
 
 
-@router.message(F.text == B.get("help"))
-async def on_help(message: Message, state: FSMContext):
-    """
-    US2: помощь.
-    FSM остаётся в STANDARD (по ТЗ).
-    """
-    await state.set_state(UserStates.STANDARD)
+# Кнопка "Отчеты"
+@router.message(UserStates.STANDARD, F.text == B.get("reports"))
+async def on_reports(message: Message, state: FSMContext):
+    await message.answer(
+        T.get("reports_placeholder"),
+        reply_markup=main_menu_kb(),
+    )
 
+
+# Кнопка "Помощь"
+@router.message(UserStates.STANDARD, F.text == B.get("help"))
+async def on_help(message: Message, state: FSMContext):
     await message.answer(
         T.get("help_text"),
         reply_markup=main_menu_kb(),
     )
 
 
-@router.message(F.text == B.get("profile"))
+# Кнопка "Профиль" (заглушка)
+@router.message(UserStates.STANDARD, F.text == B.get("profile"))
 async def on_profile(message: Message, state: FSMContext):
-    """
-    US3: профиль (пока заглушка без данных из БД).
-    """
-    await state.set_state(UserStates.STANDARD)
-
     await message.answer(
-        "👤 Профиль пока в разработке.\n"
-        "Тут будет:\n"
-        "• тип подписки\n"
-        "• использованные лимиты за сегодня\n"
-        "• план по калориям",
+        T.get("feature_development"),
         reply_markup=main_menu_kb(),
     )
 
 
-@router.message(F.text == B.get("reports"))
-async def on_reports(message: Message, state: FSMContext):
-    """
-    US6: отчёты (заглушка).
-    """
-    await state.set_state(UserStates.STANDARD)
-
-    await message.answer(
-        "📊 Отчёты пока в разработке.\n"
-        "Здесь появится:\n"
-        "• отчет за день\n"
-        "• за неделю\n"
-        "• за месяц",
-        reply_markup=main_menu_kb(),
-    )
-
-
-@router.message(F.text == B.get("buy_premium"))
+# Кнопка "Купить премиум" (заглушка)
+@router.message(UserStates.STANDARD, F.text == B.get("buy_premium"))
 async def on_buy_premium(message: Message, state: FSMContext):
-    """
-    US4: покупка премиума (заглушка экрана оплаты).
-    """
-    await state.set_state(UserStates.STANDARD)
-
     await message.answer(
-        "💎 Экран оплаты премиума пока в разработке.\n"
-        "План: Telegram Stars + промокоды.",
+        T.get("feature_development"),
+        reply_markup=main_menu_kb(),
+    )
+
+
+# Универсальная кнопка "Главная"
+@router.message(F.text == B.get("back"))
+async def on_back_to_main(message: Message, state: FSMContext):
+    await state.set_state(UserStates.STANDARD)
+    await message.answer(
+        T.get("welcome_free"),
+        reply_markup=main_menu_kb(),
+    )
+
+
+# Fallback: любой текст в STANDARD
+@router.message(UserStates.STANDARD, F.text)
+async def on_unknown_in_main(message: Message, state: FSMContext):
+    await message.answer(
+        T.get("help_text"),
         reply_markup=main_menu_kb(),
     )
