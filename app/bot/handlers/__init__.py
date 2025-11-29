@@ -1,3 +1,13 @@
-from . import common, analysis, profile, reports, premium, admin
+# app/bot/handlers/__init__.py
 
-__all__ = ["common", "analysis", "profile", "reports", "premium", "admin"]
+from . import common, analysis, profile, reports, premium, admin, main_menu
+
+__all__ = [
+    "common",
+    "analysis",
+    "profile",
+    "reports",
+    "premium",
+    "admin",
+    "main_menu",
+]

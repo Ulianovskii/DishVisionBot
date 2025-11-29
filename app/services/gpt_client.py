@@ -1,18 +1,71 @@
+# app/services/gpt_client.py
+
 import asyncio
+import logging
 
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.prompts.food_analysis import (
+    SYSTEM_PROMPT_NUTRITION,
+    SYSTEM_PROMPT_RECIPE,
+    build_user_message,
+)
+
+logger = logging.getLogger(__name__)
+
+# Базовый async-клиент OpenAI
+client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+# Модель по умолчанию (можно потом вынести в settings)
+DEFAULT_MODEL = "gpt-4o-mini"
 
 
-class GPTClient:
-    def __init__(self) -> None:
-        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
-
-    async def analyze(self, prompt: str, *, user_id: str | None = None) -> str:
-        # TODO: заменить на реальный вызов модели согласно 05_openai_prompts.md
-        await asyncio.sleep(0.1)
-        return "Заглушка ответа GPT"
+def _get_model_name() -> str:
+    """
+    Если потом в Settings добавим поле openai_model — используем его.
+    Пока безопасно подхватываем его если есть, иначе дефолт.
+    """
+    return getattr(settings, "openai_model", DEFAULT_MODEL)
 
 
-gpt_client = GPTClient()
+async def _call_chat_gpt(system_prompt: str, user_text: str) -> str:
+    """
+    Общая функция вызова Chat Completions.
+    """
+    model = _get_model_name()
+    logger.debug("Calling OpenAI model=%s", model)
+
+    response = await client.chat.completions.create(
+        model=model,
+        temperature=0.3,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+    )
+
+    # Берём первый вариант ответа
+    content = response.choices[0].message.content
+    if isinstance(content, list):
+        # на всякий случай, если библиотека вернёт массив объектов
+        text_parts = [part.get("text", "") if isinstance(part, dict) else str(part) for part in content]
+        return "\n".join(text_parts)
+    return content or ""
+    
+
+async def analyze_nutrition_by_text(comment: str | None) -> str:
+    """
+    Анализ калорийности / БЖУ по текстовому описанию.
+    (Фото пока не используем, только комментарий.)
+    """
+    user_text = build_user_message(comment, analysis_type="nutrition")
+    return await _call_chat_gpt(SYSTEM_PROMPT_NUTRITION, user_text)
+
+
+async def analyze_recipe_by_text(comment: str | None) -> str:
+    """
+    Восстановление рецепта по текстовому описанию.
+    """
+    user_text = build_user_message(comment, analysis_type="recipe")
+    return await _call_chat_gpt(SYSTEM_PROMPT_RECIPE, user_text)
