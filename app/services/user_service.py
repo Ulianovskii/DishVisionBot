@@ -47,13 +47,15 @@ async def get_or_create_user(telegram_id: int) -> User:
 
         await session.refresh(user)
         return user
-    
+
+
 async def _is_premium_user(telegram_id: int) -> bool:
     """
     Проверка, является ли пользователь премиумным.
-    Проверяем поле `is_premium` в таблице пользователей.
+    Смотрим поле `is_premium` в таблице users.
     """
-    user = await User.query.where(User.telegram_id == telegram_id).gino.first()
-    if user and user.is_premium:
-        return True
-    return False
+    async with AsyncSessionLocal() as session:
+        stmt = select(User.is_premium).where(User.telegram_id == telegram_id)
+        result = await session.execute(stmt)
+        is_premium = result.scalar_one_or_none()
+        return bool(is_premium)

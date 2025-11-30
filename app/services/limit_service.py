@@ -97,3 +97,8 @@ async def get_user_today_analyses(user_id: int, today: date) -> int:
         )
         result = await session.execute(stmt)
         limits = result.scalar_one_or_none()
+
+        if limits is None:
+            return 0  # Если нет записи, возвращаем 0, а не None
+
+        return limits.photos_used

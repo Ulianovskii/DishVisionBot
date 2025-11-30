@@ -5,14 +5,17 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from datetime import date
+
 
 from app.bot.keyboards import main_menu_kb, analysis_menu_kb
 from app.bot.states import UserStates
 from app.locales.ru.texts import RussianTexts as T
 from app.locales.ru.buttons import RussianButtons as B
-from app.services.limit_service import get_limits_for_user  # Убираем асинхронность здесь
 from app.services.user_service import get_or_create_user
 from app.config_limits import PRICE_PER_ANALYSIS  # Импортируем цену за анализ
+from app.services.limit_service import get_limits_for_user, get_user_today_analyses
+
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -26,8 +29,7 @@ async def cmd_start(message: Message, state: FSMContext):
         reply_markup=main_menu_kb(),
     )
 
-
-# Кнопка "📸 Анализировать еду"
+## Кнопка "📸 Анализировать еду"
 @router.message(UserStates.STANDARD, F.text == B.get("analyze_food"))
 async def on_analyze_food(message: Message, state: FSMContext):
     """
@@ -42,10 +44,14 @@ async def on_analyze_food(message: Message, state: FSMContext):
 
     # Получаем сегодня анализы из БД
     data = await state.get_data()
-    today = date.today()
+    today = date.today()  # Используем правильно импортированный date
 
     # Получаем количество использованных анализов на сегодня
     used_analyses = await get_user_today_analyses(user.id, today)
+
+    # Добавляем проверку на None для used_analyses
+    if used_analyses is None:
+        used_analyses = 0  # Устанавливаем значение по умолчанию
 
     if used_analyses >= daily_limit:
         # Лимит исчерпан
