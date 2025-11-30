@@ -1,7 +1,7 @@
+# app/bot/keyboards.py
+
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-
 from app.locales.ru.buttons import RussianButtons as B
-
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
     """Главное меню (STATE_STANDARD)"""
@@ -20,20 +20,27 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     )
 
 
-def analysis_menu_kb() -> ReplyKeyboardMarkup:
-    """Меню под фото в режиме анализа (STATE_PHOTO_COMMENT)"""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text=B.get("nutrition")),
-                KeyboardButton(text=B.get("recipe")),
-            ],
-            [KeyboardButton(text=B.get("new_photo"))],
-            [KeyboardButton(text=B.get("back"))],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
-    )
+def analysis_menu_kb(disable_buttons=False) -> ReplyKeyboardMarkup:
+    """
+    Возвращает клавиатуру для анализа (кнопки "Калорийность", "Рецепт").
+    Если disable_buttons=True, кнопки становятся неактивными и скрываются.
+    """
+    keyboard = []
+
+    if not disable_buttons:
+        # Если кнопки активны, показываем их
+        keyboard.append([
+            KeyboardButton(text=B.get("nutrition")),  # Локализуем текст кнопки
+            KeyboardButton(text=B.get("recipe")),    # Локализуем текст кнопки
+        ])
+    
+    # Кнопка "Новое фото" всегда видна
+    keyboard.append([KeyboardButton(text=B.get("new_photo"))])
+    
+    # Кнопка "Назад" всегда видна
+    keyboard.append([KeyboardButton(text=B.get("back"))])
+
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 def profile_menu_kb() -> ReplyKeyboardMarkup:

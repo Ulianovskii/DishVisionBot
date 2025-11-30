@@ -2,22 +2,17 @@ version: "3.9"
 
 services:
   db:
-    image: postgres:15
+    image: postgres:16
+    container_name: dishvision-postgres
     environment:
-      POSTGRES_DB: foodlens
-      POSTGRES_USER: foodlens_user
-      POSTGRES_PASSWORD: foodlens_password
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: dishvision
     ports:
       - "5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
-
-  bot:
-    build: .
-    env_file:
-      - .env
-    depends_on:
-      - db
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
 
 volumes:
-  db_data:
+  pgdata:

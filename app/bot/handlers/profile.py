@@ -42,7 +42,7 @@ def build_profile_keyboard(is_premium: bool = False) -> ReplyKeyboardMarkup:
 @router.message(F.text == B.get("profile"))
 async def on_profile_open(message: Message, state: FSMContext):
     # Профиль — это STATE_STANDARD
-    await state.set_state(UserStates.STATE_STANDARD)
+    await state.set_state(UserStates.STANDARD)
 
     # TODO: когда появятся лимиты и подписки — брать из БД
     # Пока всё жёстко захардкожено как бесплатный тариф с нулевым использованием
@@ -121,7 +121,7 @@ async def on_calorie_plan_input(message: Message, state: FSMContext):
         )
 
     # 4. Возвращаемся в STATE_STANDARD и снова открываем профиль
-    await state.set_state(UserStates.STATE_STANDARD)
+    await state.set_state(UserStates.STANDARD)
 
     # Пока считаем, что пользователь на бесплатном тарифе и план только что ввели
     await message.answer(

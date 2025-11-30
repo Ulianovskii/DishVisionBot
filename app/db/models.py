@@ -8,6 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
+
+
 # 4.1. Таблица users
 class User(Base):
     __tablename__ = "users"

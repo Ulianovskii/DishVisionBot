@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     api_timeout: int = 30
     max_file_size: int = 10 * 1024 * 1024  # 10MB
 
-    database_url: str
+    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/dishvision"
     admin_user_ids: str = ""
 
     model_config = SettingsConfigDict(
