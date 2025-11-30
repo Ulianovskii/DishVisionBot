@@ -5,14 +5,20 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Что хотим выгрузить
 TARGETS=(
-  "app/main.py"
-  "app/config.py"
-  "app/config_limits.py"
-  "app/bot"
-  "app/db"
-  "app/services"
-  "app/locales/ru"
-  "app/prompts"
+app/config_limits.py
+app/bot/handlers/main_menu.py
+app/bot/handlers/analysis.py
+app/bot/handlers/premium.py
+app/bot/handlers/profile.py
+app/bot/handlers/admin.py
+app/bot/keyboards.py
+app/bot/states.py
+app/locales/ru/buttons.py
+app/locales/ru/texts.py
+app/services/limit_service.py
+app/services/user_service.py
+app/db/models.py
+app/main.py
 )
 
 echo "=== DishVisionBot file export ==="

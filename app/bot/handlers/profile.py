@@ -12,7 +12,7 @@ from app.locales.ru.texts import RussianTexts as T
 from app.services.user_service import get_or_create_user
 from app.services.limit_service import get_limits_for_user, get_user_today_analyses
 
-router = Router()
+router = Router(name="profile")
 
 
 def _now_utc() -> datetime:
@@ -36,14 +36,16 @@ def _is_effective_premium(user) -> bool:
     """
     Реально ли у пользователя активен премиум сейчас:
     - user.is_premium == True
-    - premium_until в будущем (UTC)
+    - premium_until в будущем (UTC) ИЛИ premium_until == None (бессрочный премиум)
     """
     if not getattr(user, "is_premium", False):
         return False
 
     premium_until = _normalize_to_utc(getattr(user, "premium_until", None))
-    if not premium_until:
-        return False
+
+    # None трактуем как "бессрочный премиум"
+    if premium_until is None:
+        return True
 
     now = _now_utc()
     return premium_until > now
@@ -89,17 +91,12 @@ async def on_profile_open(message: Message, state: FSMContext):
     """
     await state.set_state(UserStates.STANDARD)
 
-    # Берём пользователя из БД (через сервис, не завязываемся на middleware)
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
 
-    # Реально ли премиум активен сейчас
     is_premium = _is_effective_premium(user)
-
-    # Лимиты по тарифу
     daily_limit, _ = get_limits_for_user(is_premium=is_premium)
 
-    # Сколько анализов уже использовано сегодня
     today = date.today()
     used_today = await get_user_today_analyses(user.id, today)
     if used_today is None:
@@ -107,7 +104,6 @@ async def on_profile_open(message: Message, state: FSMContext):
 
     remaining = max(daily_limit - used_today, 0)
 
-    # Собираем текст профиля
     lines: list[str] = []
 
     if is_premium:
@@ -117,7 +113,6 @@ async def on_profile_open(message: Message, state: FSMContext):
 
     premium_until_utc = _normalize_to_utc(getattr(user, "premium_until", None))
     if premium_until_utc and is_premium:
-        # Показываем дату в формате YYYY-MM-DD
         until_str = premium_until_utc.date().isoformat()
         lines.append(T.get("profile_premium_until", date=until_str))
 
@@ -128,10 +123,12 @@ async def on_profile_open(message: Message, state: FSMContext):
         T.get("profile_remaining", remaining=remaining)
     )
 
-    # Блок про план калорий оставляем простым, без БД (реализуем позже)
     lines.append("")
     lines.append("🎯 План по калориям: не задан.")
-    lines.append("Нажмите «План калорий», чтобы задать его (логика будет добавлена позже).")
+    lines.append(
+        "Нажмите «План калорий», чтобы задать его "
+        "(логика будет добавлена позже)."
+    )
 
     await message.answer(
         "\n".join(lines),
@@ -171,15 +168,12 @@ async def on_calorie_plan_input(message: Message, state: FSMContext):
         return
 
     if value == 0:
-        # TODO: сбросить план в БД
         await message.answer(T.get("calories_plan_reset"))
     else:
-        # TODO: сохранить план в БД
         await message.answer(T.get("calories_plan_saved", calories=value))
 
     await state.set_state(UserStates.STANDARD)
 
-    # Обновлённый профиль после изменения плана (пока без реального чтения плана)
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
     is_premium = _is_effective_premium(user)

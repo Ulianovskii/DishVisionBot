@@ -7,13 +7,14 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.bot.keyboards import main_menu_kb, analysis_menu_kb
+from app.bot.keyboards import main_menu_kb, analysis_menu_kb, premium_menu_kb
 from app.bot.states import UserStates
 from app.locales.ru.texts import RussianTexts as T
 from app.locales.ru.buttons import RussianButtons as B
 from app.services.user_service import get_or_create_user
 from app.config_limits import PRICE_PER_ANALYSIS
 from app.services.limit_service import get_limits_for_user, get_user_today_analyses
+
 
 
 router = Router()
@@ -118,11 +119,17 @@ async def on_profile(message: Message, state: FSMContext):
 # Кнопка "Купить премиум"
 @router.message(UserStates.STANDARD, F.text == B.get("buy_premium"))
 async def on_buy_premium(message: Message, state: FSMContext):
-    from app.bot.handlers import premium as premium_handlers  # чтобы не было цикличного импорта
-    # Просто делегируем в premium.open_premium, но здесь оставляем заглушку на всякий случай
+    """
+    Открываем экран покупки премиума:
+    - недельная подписка
+    - месячная подписка
+    - ввод промокода
+    """
+    await state.set_state(UserStates.STANDARD)
+
     await message.answer(
         T.get("premium_info"),
-        reply_markup=main_menu_kb(),
+        reply_markup=premium_menu_kb(),
     )
 
 

@@ -108,7 +108,8 @@ def admin_limits_menu_kb() -> ReplyKeyboardMarkup:
                 KeyboardButton(text=B.get("admin_premium_off_me")),
             ],
             [KeyboardButton(text=B.get("admin_limits_reset_other"))],
-            [KeyboardButton(text=B.get("back"))],
+            # ВАЖНО: отдельная кнопка для возврата в админ-меню, НЕ общий back
+            [KeyboardButton(text=B.get("admin_limits_back"))],
         ],
         resize_keyboard=True,
     )

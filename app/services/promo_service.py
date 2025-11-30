@@ -1,44 +1,48 @@
 # app/services/promo_service.py
 
-import secrets
-from datetime import datetime, timedelta
+from __future__ import annotations
 
-from sqlalchemy import select, func
-from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Tuple
+
+from sqlalchemy import select
 
 from app.db.base import AsyncSessionLocal
-from app.db.models import (
-    PromoCode,
-    PromoCodeActivation,
-    PromoBan,
-    User,
-)
-from app.config_limits import (
-    PROMO_MAX_ATTEMPTS_BEFORE_BAN,
-    PROMO_BAN_MINUTES_FIRST,
-    PROMO_BAN_MINUTES_SECOND,
-    PROMO_BAN_MINUTES_THIRD,
-)
+from app.db import models
 
 
-# -----------------------------------------------------------
-# Генерация промокодов (админ)
-# -----------------------------------------------------------
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
-async def generate_promo_codes(count: int, days: int, created_by: int, expires_at=None) -> list[str]:
+
+# =====================================================
+#               ГЕНЕРАЦИЯ ПРОМОКОДОВ (АДМИНКА)
+# =====================================================
+
+async def generate_promo_codes(
+    count: int,
+    days: int,
+    created_by: Optional[int] = None,
+    expires_at: Optional[datetime] = None,
+    max_activations: int = 1,
+) -> List[str]:
     """
-    Генерирует count промокодов, каждый на days дней премиума.
-    expires_at можно передать руками, иначе не задаём.
+    Генерация `count` промокодов на `days` дней премиума.
+
+    max_activations:
+      - по умолчанию 1: один код = одна активация
+      - можно задать больше, если нужно многоразовое использование
     """
-    codes = []
+    codes: List[str] = []
 
     async with AsyncSessionLocal() as session:
         for _ in range(count):
-            code = secrets.token_hex(4).upper()   # 8 символов вида A1B2C3D4
-            promo = PromoCode(
+            code = _generate_code()
+
+            promo = models.PromoCode(
                 code=code,
                 days=days,
-                max_activations=1,
+                max_activations=max_activations,
                 activations=0,
                 expires_at=expires_at,
                 created_by=created_by,
@@ -51,162 +55,127 @@ async def generate_promo_codes(count: int, days: int, created_by: int, expires_a
     return codes
 
 
-# -----------------------------------------------------------
-# Получение промокода из БД
-# -----------------------------------------------------------
-
-async def get_code(code: str) -> PromoCode | None:
-    async with AsyncSessionLocal() as session:
-        stmt = select(PromoCode).where(func.lower(PromoCode.code) == code.lower())
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
-
-
-# -----------------------------------------------------------
-# Анти-спам: бан за неверные промокоды
-# -----------------------------------------------------------
-
-async def register_failed_attempt(user_id: int):
+def _generate_code() -> str:
     """
-    Записываем неверный ввод промокода.
-    Если достигнут лимит — выдаём бан.
+    Короткий человекочитаемый код, например: 065E89D9
     """
+    import secrets
+
+    return secrets.token_hex(4).upper()
+
+
+# =====================================================
+#             АКТИВАЦИЯ ПРОМОКОДА ПОЛЬЗОВАТЕЛЕМ
+# =====================================================
+
+async def redeem_promo_code(
+    code: str,
+    telegram_id: int,
+) -> Tuple[bool, str, Optional[int]]:
+    """
+    Активация промокода пользователем.
+
+    Возвращает:
+      - success: bool
+      - reason: str:
+          "ok"        — успешно,
+          "not_found" — кода нет,
+          "used"      — промокод исчерпан или уже использован этим пользователем,
+          "expired"   — истёк срок действия,
+          "internal"  — внутренняя ошибка.
+      - days: Optional[int] — сколько дней премиума добавлено (если success=True)
+    """
+    code = (code or "").strip().upper()
+    if not code:
+        return False, "not_found", None
+
     async with AsyncSessionLocal() as session:
-        # Считаем попытки за последние 24 часа
-        since = datetime.utcnow() - timedelta(hours=24)
-        stmt = (
-            select(func.count())
-            .select_from(PromoCodeActivation)
-            .where(
-                PromoCodeActivation.user_id == user_id,
-                PromoCodeActivation.activated_at >= since,
-                PromoCodeActivation.promo_code_id == None,  # type: ignore
+        try:
+            # 1. Ищем промокод
+            stmt = select(models.PromoCode).where(models.PromoCode.code == code)
+            res = await session.execute(stmt)
+            promo: models.PromoCode | None = res.scalar_one_or_none()
+
+            if not promo:
+                return False, "not_found", None
+
+            now = _now_utc()
+
+            # 2. Проверяем истечение срока
+            if promo.expires_at is not None:
+                exp = promo.expires_at
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                else:
+                    exp = exp.astimezone(timezone.utc)
+
+                if exp < now:
+                    return False, "expired", None
+
+            # 3. Проверяем, не исчерпаны ли активации
+            current_activations = promo.activations or 0
+            if current_activations >= promo.max_activations:
+                return False, "used", None
+
+            # 4. Находим / создаём пользователя по telegram_id
+            stmt_user = select(models.User).where(
+                models.User.telegram_id == telegram_id
             )
-        )
-        result = await session.execute(stmt)
-        failures = result.scalar() or 0
+            res_user = await session.execute(stmt_user)
+            user: models.User | None = res_user.scalar_one_or_none()
 
-        failures += 1
+            if not user:
+                user = models.User(
+                    telegram_id=telegram_id,
+                    is_premium=False,
+                    premium_until=None,
+                )
+                session.add(user)
+                await session.flush()  # чтобы получить user.id
 
-        # Создаём запись о неуспешной попытке
-        session.add(
-            PromoCodeActivation(
-                user_id=user_id,
-                promo_code_id=None,  # type: ignore
+            # 5. Проверяем, не активировал ли этот юзер уже этот промокод
+            stmt_act = select(models.PromoCodeActivation).where(
+                models.PromoCodeActivation.promo_code_id == promo.id,
+                models.PromoCodeActivation.user_id == user.id,
             )
-        )
+            res_act = await session.execute(stmt_act)
+            activation = res_act.scalar_one_or_none()
 
-        # Проверяем пороги бана
-        if failures >= PROMO_MAX_ATTEMPTS_BEFORE_BAN:
-            # Считаем количество предыдущих банов
-            bans_stmt = select(func.count()).select_from(PromoBan).where(PromoBan.user_id == user_id)
-            bans_res = await session.execute(bans_stmt)
-            ban_count = bans_res.scalar() or 0
+            if activation is not None:
+                # этот пользователь уже пользовался этим кодом
+                return False, "used", None
 
-            if ban_count == 0:
-                minutes = PROMO_BAN_MINUTES_FIRST
-            elif ban_count == 1:
-                minutes = PROMO_BAN_MINUTES_SECOND
-            else:
-                minutes = PROMO_BAN_MINUTES_THIRD
+            # 6. Продление / включение премиума
+            now_utc = now
+            base_from = now_utc
 
-            banned_until = datetime.utcnow() + timedelta(minutes=minutes)
+            if user.premium_until is not None:
+                pu = user.premium_until
+                if pu.tzinfo is None:
+                    pu = pu.replace(tzinfo=timezone.utc)
+                else:
+                    pu = pu.astimezone(timezone.utc)
 
-            ban = PromoBan(
-                user_id=user_id,
-                banned_until=banned_until,
-                reason="Too many invalid promo attempts"
+                # если премиум ещё действует — продлеваем от конца,
+                # если уже истёк — от текущего момента
+                if pu > now_utc:
+                    base_from = pu
+
+            user.is_premium = True
+            user.premium_until = base_from + timedelta(days=promo.days)
+
+            # 7. Записываем активацию и увеличиваем счётчик
+            new_activation = models.PromoCodeActivation(
+                promo_code_id=promo.id,
+                user_id=user.id,
             )
-            session.add(ban)
+            session.add(new_activation)
 
-        await session.commit()
+            promo.activations = current_activations + 1
 
+            await session.commit()
+            return True, "ok", promo.days
 
-async def check_ban(user_id: int) -> datetime | None:
-    """
-    Проверяет, забанен ли пользователь по промокодам.
-    Возвращает datetime разбана или None.
-    """
-    async with AsyncSessionLocal() as session:
-        now = datetime.utcnow()
-        stmt = select(PromoBan).where(
-            PromoBan.user_id == user_id,
-            PromoBan.banned_until > now
-        )
-        res = await session.execute(stmt)
-        ban = res.scalar_one_or_none()
-
-        if ban:
-            return ban.banned_until
-
-        return None
-
-
-# -----------------------------------------------------------
-# Активация промокода
-# -----------------------------------------------------------
-
-async def activate_code(user_id: int, code: str):
-    """
-    Пытается активировать промокод.
-    Возвращает: (status: str, extra: dict)
-    """
-
-    async with AsyncSessionLocal() as session:
-        # Проверяем бан
-        ban_until = await check_ban(user_id)
-        if ban_until:
-            return "banned", {"until": ban_until}
-
-        promo = await get_code(code)
-        if not promo:
-            await register_failed_attempt(user_id)
-            return "not_found", {}
-
-        # Проверка срока
-        if promo.expires_at and promo.expires_at < datetime.utcnow():
-            await register_failed_attempt(user_id)
-            return "expired", {}
-
-        # Проверка лимита активаций
-        if promo.activations >= promo.max_activations:
-            await register_failed_attempt(user_id)
-            return "already_used", {}
-
-        # Проверка: активировал ли раньше этот промо
-        stmt = select(PromoCodeActivation).where(
-            PromoCodeActivation.promo_code_id == promo.id,
-            PromoCodeActivation.user_id == user_id
-        )
-        rs = await session.execute(stmt)
-        existing = rs.scalar_one_or_none()
-        if existing:
-            await register_failed_attempt(user_id)
-            return "already_used", {}
-
-        # Всё ок — активируем
-        # 1) продлеваем премиум
-        user_stmt = select(User).where(User.id == user_id)
-        ur = await session.execute(user_stmt)
-        user = ur.scalar_one()
-
-        now = datetime.utcnow()
-        base = user.premium_until if (user.premium_until and user.premium_until > now) else now
-
-        new_until = base + timedelta(days=promo.days)
-        user.is_premium = True
-        user.premium_until = new_until
-
-        # 2) записываем активацию
-        activation = PromoCodeActivation(
-            promo_code_id=promo.id,
-            user_id=user_id,
-        )
-        session.add(activation)
-
-        # 3) увеличиваем счётчик активаций
-        promo.activations += 1
-
-        await session.commit()
-
-        return "ok", {"until": new_until}
+        except Exception:
+            await session.rollback()
+            return False, "internal", None

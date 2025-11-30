@@ -48,6 +48,7 @@ class RussianButtons:
         "admin_premium_on_me": "⭐ Включить мой премиум",
         "admin_premium_off_me": "🚫 Выключить мой премиум",
         "admin_limits_reset_other": "👤 Сброс лимитов по telegram_id",
+        "admin_limits_back": "⬅️ Назад",
 
         # Управление лимитами
         "admin_sub_toggle_premium": "💎 Установить режим премиум",

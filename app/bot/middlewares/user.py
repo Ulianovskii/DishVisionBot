@@ -32,7 +32,9 @@ class UserMiddleware(BaseMiddleware):
 
         if tg_user is not None:
             user = await get_or_create_user(telegram_id=tg_user.id)
+            # кладём и под старым ключом, и под универсальным
             data["db_user"] = user
+            data["user"] = user
 
             state: FSMContext | None = data.get("state")
             if state is not None:
