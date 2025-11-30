@@ -1,5 +1,3 @@
-# app/bot/handlers/__init__.py
-
 from aiogram import Router
 
 from . import common, analysis, profile, reports, premium, admin, main_menu

@@ -1,15 +1,12 @@
 # app/bot/handlers/analysis.py
 
-# Стандартные библиотеки
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-# Сторонние библиотеки
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-# Локальные модули
 from app.bot.keyboards import analysis_menu_kb, main_menu_kb
 from app.bot.states import UserStates
 from app.locales.ru.texts import RussianTexts as T
@@ -31,13 +28,42 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+def _normalize_to_utc(dt: datetime | None) -> datetime | None:
+    """
+    Приводим datetime к UTC-aware.
+    Если None — возвращаем None.
+    """
+    if dt is None:
+        return None
+
+    if dt.tzinfo is None:
+        # считаем, что это уже UTC без таймзоны
+        return dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(timezone.utc)
+
+
+def _is_effective_premium(user) -> bool:
+    """
+    Пользователь считается премиумным, если:
+    - is_premium = True и
+    - premium_until либо не задан (бессрочный премиум), либо в будущем (UTC).
+    """
+    if not getattr(user, "is_premium", False):
+        return False
+
+    premium_until = _normalize_to_utc(getattr(user, "premium_until", None))
+    now = datetime.now(timezone.utc)
+
+    # premium_until=None → бессрочный премиум
+    if premium_until is None:
+        return True
+
+    return premium_until > now
+
 
 
 async def _download_photo_bytes(message: Message, file_id: str | None) -> bytes | None:
-    """
-    Скачиваем фото по file_id из Telegram.
-    """
     if not file_id:
         await message.answer(T.get("photo_not_found"))
         return None
@@ -54,27 +80,14 @@ async def _download_photo_bytes(message: Message, file_id: str | None) -> bytes 
 
 
 async def _ensure_session_active(message: Message, state: FSMContext) -> bool:
-    """
-    Проверяет тайм-аут сессии анализа.
-
-    Если сессия старше PHOTO_SESSION_TIMEOUT_MINUTES:
-      - очищаем контекст
-      - переводим в STANDARD
-      - показываем текст о том, что сессия истекла
-      - возвращаем False
-
-    Иначе возвращаем True.
-    """
     data = await state.get_data()
     started_at_str = data.get("session_started_at")
     if not started_at_str:
-        # Старые сессии, когда мы ещё не писали started_at — считаем живыми
         return True
 
     try:
         started_at = datetime.fromisoformat(started_at_str)
     except Exception:
-        # Если формат странный — не роняем бота
         return True
 
     now = datetime.utcnow()
@@ -92,12 +105,12 @@ async def _ensure_session_active(message: Message, state: FSMContext) -> bool:
 
 async def _get_limits(message: Message) -> tuple[int, int]:
     """
-    Возвращает (daily_limit, refinements_limit) для пользователя.
-
-    Пока считаем всех на бесплатном тарифе (is_premium = False),
-    чтобы не тащить сюда логику премиума.
+    Возвращает (daily_limit, refinements_limit) для пользователя
+    с учётом премиума.
     """
-    is_premium = False
+    telegram_id = message.from_user.id
+    user = await get_or_create_user(telegram_id)
+    is_premium = _is_effective_premium(user)
     return get_limits_for_user(is_premium)
 
 
@@ -107,29 +120,25 @@ async def _check_and_increment_daily_limit(
     increment: bool,
 ) -> bool:
     """
-    Проверяем дневной лимит анализов (фото) через БД и, если нужно, увеличиваем счётчик.
+    Проверяем дневной лимит анализов (фото) и, при необходимости, увеличиваем счётчик.
 
     increment = True — только для ПЕРВОГО анализа нового фото.
     Уточнения и повторные прогоны по тому же фото лимит не тратят.
     """
     if not increment:
-        # Для уточнений лимит по фото не тратим
         return True
 
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
 
-    # Пока считаем всех бесплатными
-    is_premium = False
+    is_premium = _is_effective_premium(user)
 
-    # Пытаемся списать одну "фото-квоту"
     allowed, used, daily_limit = await consume_photo_quota(
         user_id=user.id,
         is_premium=is_premium,
     )
 
     if not allowed:
-        # Лимит исчерпан — показываем текст + в главное меню
         await message.answer(
             T.get("daily_limit_exceeded").format(limit=daily_limit)
             + "\n"
@@ -151,12 +160,9 @@ async def _check_and_increment_daily_limit(
     return True
 
 
-# --- ПРОВЕРКА ДНЕВНОГО ЛИМИТА БЕЗ СПИСАНИЯ (ДЛЯ ФОТО) ---
-
-
 async def _check_daily_limit(message: Message, state: FSMContext) -> bool:
     """
-    Проверяет, исчерпан ли лимит бесплатных анализов на сегодня,
+    Проверяет, исчерпан ли лимит анализов на сегодня,
     не изменяя счётчики.
 
     Используем при получении НОВОГО фото — до реального списания квоты.
@@ -164,8 +170,7 @@ async def _check_daily_limit(message: Message, state: FSMContext) -> bool:
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
 
-    # Лимиты для пользователя (пока без премиума)
-    is_premium = False
+    is_premium = _is_effective_premium(user)
     daily_limit, _ = get_limits_for_user(is_premium)
 
     today = date.today()
@@ -187,32 +192,20 @@ async def _check_daily_limit(message: Message, state: FSMContext) -> bool:
     return True
 
 
-# --- ОСНОВНОЙ ЗАПУСК АНАЛИЗА ---
-
-
 async def _run_analysis(
     message: Message,
     state: FSMContext,
-    analysis_type: str,  # "nutrition" / "recipe"
+    analysis_type: str,
     comment: str,
     count_for_daily_limit: bool,
     strip_questions: bool = False,
 ) -> None:
-    """
-    Общая функция: качаем фото, зовём GPT, показываем результат.
-
-    strip_questions:
-      - если True, вырезаем строки с уточняющими вопросами (начинаются с '⁉️')
-        перед отправкой ответа пользователю.
-    """
-    # Проверяем, что сессия ещё жива
     if not await _ensure_session_active(message, state):
         return
 
     data = await state.get_data()
     photo_id = data.get("current_photo_file_id")
 
-    # Проверка дневного лимита (только для первого анализа фото, с реальным списанием)
     can_run = await _check_and_increment_daily_limit(
         message, state, increment=count_for_daily_limit
     )
@@ -241,7 +234,6 @@ async def _run_analysis(
 
         await message.answer(result, reply_markup=analysis_menu_kb())
 
-        # увеличиваем счётчик вызовов GPT для текущего фото
         calls = int(data.get("gpt_calls_for_current_photo", 0))
         await state.update_data(gpt_calls_for_current_photo=calls + 1)
 
@@ -253,17 +245,9 @@ async def _run_analysis(
         )
 
 
-# --- ХЕНДЛЕРЫ ---
-
-
-# 1. Любое фото — старт анализа (с подписью или без)
+# 1. Любое фото — старт анализа
 @router.message(F.photo)
 async def on_photo_received(message: Message, state: FSMContext):
-    """
-    Пользователь прислал новое фото — начинаем новую сессию анализа.
-    Caption используем как первичный комментарий (не считается уточнением).
-    """
-    # Перед тем как продолжить, проверяем лимит по количеству анализов
     if not await _check_daily_limit(message, state):
         return
 
@@ -310,18 +294,13 @@ async def on_nutrition_request(message: Message, state: FSMContext):
     calls = int(data.get("gpt_calls_for_current_photo", 0))
     count_for_daily_limit = calls == 0
 
-    # Проверяем, исчерпан ли лимит уточнений
     _, refinement_limit = await _get_limits(message)
     refinements_used = int(data.get("refinements_used", 0))
 
     if refinements_used >= refinement_limit:
         await message.answer(
-            T.get("refinement_limit_reached_buttons_disabled"),
-            reply_markup=analysis_menu_kb(
-                disable_buttons=True,
-                hide_nutrition_button=True,
-                hide_recipe_button=False,
-            ),
+            T.get("refinement_limit_reached"),
+            reply_markup=analysis_menu_kb(disable_buttons=True),
         )
         return
 
@@ -361,7 +340,6 @@ async def on_recipe_request(message: Message, state: FSMContext):
     recipe_used = bool(data.get("recipe_used"))
     nutrition_used = bool(data.get("nutrition_used"))
 
-    # если уже был рецепт И уже была калорийность — обратно к рецепту не пускаем
     if recipe_used and nutrition_used:
         await message.answer(
             T.get("refinement_limit_reached"),
@@ -373,18 +351,13 @@ async def on_recipe_request(message: Message, state: FSMContext):
     calls = int(data.get("gpt_calls_for_current_photo", 0))
     count_for_daily_limit = calls == 0
 
-    # Проверка лимита уточнений
     _, refinement_limit = await _get_limits(message)
     refinements_used = int(data.get("refinements_used", 0))
 
     if refinements_used >= refinement_limit:
         await message.answer(
-            T.get("refinement_limit_reached_buttons_disabled"),
-            reply_markup=analysis_menu_kb(
-                disable_buttons=True,
-                hide_nutrition_button=False,
-                hide_recipe_button=True,
-            ),
+            T.get("refinement_limit_reached"),
+            reply_markup=analysis_menu_kb(disable_buttons=True),
         )
         return
 
@@ -408,10 +381,6 @@ async def on_recipe_request(message: Message, state: FSMContext):
 # 4. Кнопка "Новое фото"
 @router.message(UserStates.PHOTO_COMMENT, F.text == B.get("new_photo"))
 async def on_new_photo(message: Message, state: FSMContext):
-    """
-    Сбрасываем текущую сессию и просим прислать новое фото.
-    """
-    # Сбрасываем состояние сессии
     await state.set_state(UserStates.PHOTO_COMMENT)
     await state.update_data(
         current_photo_file_id=None,
@@ -425,14 +394,12 @@ async def on_new_photo(message: Message, state: FSMContext):
         messages_count=0,
     )
 
-    # Переводим в главное меню (как в исходной логике new_photo по ТЗ)
     await state.set_state(UserStates.STANDARD)
 
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
 
-    # Лимиты (все ещё без премиума)
-    is_premium = False
+    is_premium = _is_effective_premium(user)
     daily_limit, _ = get_limits_for_user(is_premium)
 
     today = date.today()
@@ -467,7 +434,8 @@ async def on_back_to_main_from_photo(message: Message, state: FSMContext):
 
 
 # 6. Текст в режиме PHOTO_COMMENT — уточнения / комментарии
-@router.message(UserStates.PHOTO_COMMENT, F.text)
+# ВАЖНО: НЕ ПЕРЕХВАТЫВАЕМ КОМАНДЫ ("/superadmin" и т.п.)
+@router.message(UserStates.PHOTO_COMMENT, F.text, ~F.text.startswith("/"))
 async def on_comment_text(message: Message, state: FSMContext):
     """
     Пользователь пишет текст, пока открыта сессия анализа фото.
@@ -488,17 +456,14 @@ async def on_comment_text(message: Message, state: FSMContext):
     prev_comment = data.get("current_comment", "")
     new_comment = (prev_comment + "\n" + message.text).strip()
 
-    # Обновляем комментарий
     await state.update_data(current_comment=new_comment)
 
-    # Обновляем счётчик сообщений к фото
     messages_count = int(data.get("messages_count", 0)) + 1
     await state.update_data(messages_count=messages_count)
 
     last_type = data.get("last_analysis_type")
     calls = int(data.get("gpt_calls_for_current_photo", 0))
 
-    # 1. Принудительный анализ ТОЛЬКО до первого вызова GPT
     if calls == 0 and messages_count >= PHOTO_SESSION_MAX_MESSAGES:
         if not last_type:
             last_type = "nutrition"
@@ -509,19 +474,16 @@ async def on_comment_text(message: Message, state: FSMContext):
             reply_markup=analysis_menu_kb(),
         )
 
-        count_for_daily_limit = True  # это первый анализ для фото
-
         await _run_analysis(
             message=message,
             state=state,
             analysis_type=last_type,
             comment=new_comment,
-            count_for_daily_limit=count_for_daily_limit,
+            count_for_daily_limit=True,
             strip_questions=False,
         )
         return
 
-    # 2. Анализ ещё не запускали — просто копим комментарии
     if calls == 0 and not last_type:
         await message.answer(
             T.get("refinement_hint"),
@@ -529,7 +491,6 @@ async def on_comment_text(message: Message, state: FSMContext):
         )
         return
 
-    # 3. Здесь уже был хотя бы один вызов GPT → работаем как "уточнения"
     _, refinement_limit = await _get_limits(message)
     refinements_used = int(data.get("refinements_used", 0))
 
@@ -543,7 +504,6 @@ async def on_comment_text(message: Message, state: FSMContext):
     refinements_used += 1
     await state.update_data(refinements_used=refinements_used)
 
-    # Это последнее уточнение?
     is_last = refinements_used >= refinement_limit
 
     await _run_analysis(
@@ -555,7 +515,6 @@ async def on_comment_text(message: Message, state: FSMContext):
         strip_questions=is_last,
     )
 
-    # Показываем счётчик использованных уточнений
     remaining = refinement_limit - refinements_used
     if remaining > 0:
         await message.answer(
