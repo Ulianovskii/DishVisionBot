@@ -18,6 +18,10 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(sa.BigInteger, unique=True, nullable=False, index=True)
     is_premium: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.text("FALSE"))
     premium_until: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    # 🔽 НОВАЯ СТРОКА
+    paid_photos_balance: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default="0")
+
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
         nullable=False,

@@ -56,9 +56,8 @@ def build_profile_keyboard(is_premium: bool = False) -> ReplyKeyboardMarkup:
     Клавиатура профиля:
     - Анализировать еду
     - Помощь
-    - Отчёты
-    - План калорий
-    - Купить премиум (если тариф бесплатный)
+    - Профиль
+    - (опционально) Купить премиум
     """
     rows = [
         [
@@ -66,8 +65,7 @@ def build_profile_keyboard(is_premium: bool = False) -> ReplyKeyboardMarkup:
             KeyboardButton(text=B.get("help")),
         ],
         [
-            KeyboardButton(text=B.get("reports")),
-            KeyboardButton(text=B.get("calorie_plan")),
+            KeyboardButton(text=B.get("profile")),
         ],
     ]
 
@@ -85,9 +83,8 @@ async def on_profile_open(message: Message, state: FSMContext):
     """
     Профиль пользователя:
     - статус подписки (бесплатный / премиум);
-    - дата окончания премиума (если есть);
-    - использованные лимиты за сегодня.
-    План калорий пока без привязки к БД (будет позже).
+    - доступные анализы на сегодня (учитывая дневной лимит и купленные);
+    - разбор по дневному лимиту и купленным анализам.
     """
     await state.set_state(UserStates.STANDARD)
 
@@ -102,32 +99,42 @@ async def on_profile_open(message: Message, state: FSMContext):
     if used_today is None:
         used_today = 0
 
-    remaining = max(daily_limit - used_today, 0)
+    remaining_daily = max(daily_limit - used_today, 0)
+
+    # Купленные дополнительные анализы (могут быть None)
+    paid_balance = getattr(user, "paid_photos_balance", 0) or 0
+
+    # Итог: сколько анализов можно сделать прямо сейчас
+    total_available = remaining_daily + paid_balance
 
     lines: list[str] = []
 
+    # Статус подписки
     if is_premium:
         lines.append(T.get("profile_subscription_premium"))
     else:
         lines.append(T.get("profile_subscription_free"))
 
-    premium_until_utc = _normalize_to_utc(getattr(user, "premium_until", None))
-    if premium_until_utc and is_premium:
-        until_str = premium_until_utc.date().isoformat()
-        lines.append(T.get("profile_premium_until", date=until_str))
-
+    # Итог по доступным анализам
     lines.append(
-        T.get("profile_used_today", used=used_today, limit=daily_limit)
-    )
-    lines.append(
-        T.get("profile_remaining", remaining=remaining)
+        T.get("profile_total_today", total=total_available)
     )
 
+    # Разбор по дневному лимиту
     lines.append("")
-    lines.append("🎯 План по калориям: не задан.")
     lines.append(
-        "Нажмите «План калорий», чтобы задать его "
-        "(логика будет добавлена позже)."
+        T.get(
+            "profile_analyses_today",
+            used=used_today,
+            limit=daily_limit,
+            remaining=remaining_daily,
+        )
+    )
+
+    # Купленные анализы
+    lines.append("")
+    lines.append(
+        T.get("profile_paid_analyses", paid=paid_balance)
     )
 
     await message.answer(
@@ -140,7 +147,8 @@ async def on_profile_open(message: Message, state: FSMContext):
 async def on_calorie_plan_start(message: Message, state: FSMContext):
     """
     Вход в режим ввода плана калорий.
-    Пока просто валидируем число и показываем сообщения — связь с БД будет позже.
+    Сейчас эта функция не подсвечивается в интерфейсе,
+    но хендлер оставляем на будущее.
     """
     await state.set_state(UserStates.CALORIES_PLAN)
 
@@ -179,6 +187,6 @@ async def on_calorie_plan_input(message: Message, state: FSMContext):
     is_premium = _is_effective_premium(user)
 
     await message.answer(
-        "Профиль обновлён.",
+        T.get("profile_updated"),
         reply_markup=build_profile_keyboard(is_premium=is_premium),
     )

@@ -21,24 +21,30 @@ class TariffConfig:
 # ---- Тарифы ----
 
 FREE_TARIFF = TariffConfig(
-    daily_photos=5,          # Бесплатный: 5 фото/день
+    daily_photos=2,          # Бесплатный: 5 фото/день
     refinements_per_photo=2, # Бесплатный: 2 уточнения на фото
 )
 
 PREMIUM_TARIFF = TariffConfig(
-    daily_photos=15,         # Премиум: 15 фото/день
+    daily_photos=4,         # Премиум: 15 фото/день
     refinements_per_photo=5, # Премиум: 5 уточнений на фото
 )
 
+# ---- Цены премиума в звёздах ----
+
+STARS_PREMIUM_WEEK: int = 1
+STARS_PREMIUM_MONTH: int = 2
+
+
 PRICE_PER_ANALYSIS = {
-    "price": 10,  # Количество звезд
+    "price": 1,  # Количество звезд
     "number_of_analyses": 5  # Количество анализов, которое можно купить за эти звезды
 }
 
 # ---- Лимиты по сессии анализа фото ----
 
 # Максимум текстовых сообщений к одному фото в STATE_PHOTO_COMMENT
-PHOTO_SESSION_MAX_MESSAGES: int = 10
+PHOTO_SESSION_MAX_MESSAGES: int = 5
 
 # Тайм-аут неактивности сессии анализа (в минутах), после которого
 # мы считаем сессию истёкшей и просим прислать новое фото.

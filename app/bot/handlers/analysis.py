@@ -7,7 +7,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.bot.keyboards import analysis_menu_kb, main_menu_kb
+from app.bot.keyboards import analysis_menu_kb, main_menu_kb, buy_more_analyses_inline_kb
 from app.bot.states import UserStates
 from app.locales.ru.texts import RussianTexts as T
 from app.locales.ru.buttons import RussianButtons as B
@@ -23,6 +23,8 @@ from app.config_limits import (
     PHOTO_SESSION_TIMEOUT_MINUTES,
     PRICE_PER_ANALYSIS,
 )
+from app.db.base import AsyncSessionLocal
+from app.db import models
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -60,7 +62,6 @@ def _is_effective_premium(user) -> bool:
         return True
 
     return premium_until > now
-
 
 
 async def _download_photo_bytes(message: Message, file_id: str | None) -> bytes | None:
@@ -120,52 +121,110 @@ async def _check_and_increment_daily_limit(
     increment: bool,
 ) -> bool:
     """
-    Проверяем дневной лимит анализов (фото) и, при необходимости, увеличиваем счётчик.
+    Проверяем лимиты и при необходимости увеличиваем счётчик.
 
     increment = True — только для ПЕРВОГО анализа нового фото.
     Уточнения и повторные прогоны по тому же фото лимит не тратят.
+
+    Логика:
+      1) сначала тратим бесплатные анализы за день;
+      2) если бесплатные кончились, но есть купленные — тратим из paid_photos_balance;
+      3) если нет ни того, ни другого — показываем сообщение и выходим.
     """
     if not increment:
         return True
 
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
-
     is_premium = _is_effective_premium(user)
 
-    allowed, used, daily_limit = await consume_photo_quota(
-        user_id=user.id,
-        is_premium=is_premium,
-    )
+    today = date.today()
+    used_analyses = await get_user_today_analyses(user.id, today)
+    if used_analyses is None:
+        used_analyses = 0
 
-    if not allowed:
-        await message.answer(
-            T.get("daily_limit_exceeded").format(limit=daily_limit)
-            + "\n"
-            + T.get("buy_additional_analyses").format(
-                number_of_analyses=PRICE_PER_ANALYSIS["number_of_analyses"],
-                price=PRICE_PER_ANALYSIS["price"],
-            ),
-            reply_markup=main_menu_kb(),
+    daily_limit, _ = get_limits_for_user(is_premium)
+    free_left = max(daily_limit - used_analyses, 0)
+    paid_balance = user.paid_photos_balance or 0
+
+    # 1. Если есть бесплатные — пробуем списать их через consume_photo_quota
+    if free_left > 0:
+        allowed, used, daily_limit = await consume_photo_quota(
+            user_id=user.id,
+            is_premium=is_premium,
         )
-        await state.set_state(UserStates.STANDARD)
-        return False
 
-    logger.debug(
-        "User %s used %s/%s daily photo analyses",
-        telegram_id,
-        used,
-        daily_limit,
+        if allowed:
+            logger.debug(
+                "User %s used free analysis %s/%s (today)",
+                telegram_id,
+                used,
+                daily_limit,
+            )
+            return True
+
+        # Тут теоретически может быть гонка: по данным free_left>0,
+        # но consume_photo_quota уже не даёт списать. Тогда просто
+        # пробуем перейти на платные, если они есть.
+
+    # 2. Бесплатные закончились (или не удалось списать), но есть платные — тратим платный
+    if paid_balance > 0:
+        async with AsyncSessionLocal() as session:
+            db_user = await session.get(models.User, user.id)
+            if not db_user:
+                # Не нашли пользователя в БД — что-то странное, но не падаем с треском
+                await message.answer(T.get("analysis_failed"))
+                await state.set_state(UserStates.STANDARD)
+                return False
+
+            current_balance = db_user.paid_photos_balance or 0
+            if current_balance <= 0:
+                # На всякий случай ещё раз проверяем баланс в БД
+                await session.commit()
+                await message.answer(
+                    T.get("daily_limit_exceeded").format(limit=daily_limit)
+                    + "\n"
+                    + T.get("buy_additional_analyses").format(
+                        number_of_analyses=PRICE_PER_ANALYSIS["number_of_analyses"],
+                        price=PRICE_PER_ANALYSIS["price"],
+                    ),
+                    reply_markup=buy_more_analyses_inline_kb(),
+                )
+                await state.set_state(UserStates.STANDARD)
+                return False
+
+            db_user.paid_photos_balance = current_balance - 1
+            await session.commit()
+
+            logger.debug(
+                "User %s used PAID analysis, remaining paid balance: %s",
+                telegram_id,
+                current_balance - 1,
+            )
+
+        return True
+
+    # 3. Нет ни бесплатных, ни платных — показываем сообщение о лимите
+    await message.answer(
+        T.get("daily_limit_exceeded").format(limit=daily_limit)
+        + "\n"
+        + T.get("buy_additional_analyses").format(
+            number_of_analyses=PRICE_PER_ANALYSIS["number_of_analyses"],
+            price=PRICE_PER_ANALYSIS["price"],
+        ),
+        reply_markup=buy_more_analyses_inline_kb(),
     )
-    return True
+    await state.set_state(UserStates.STANDARD)
+    return False
 
 
 async def _check_daily_limit(message: Message, state: FSMContext) -> bool:
     """
-    Проверяет, исчерпан ли лимит анализов на сегодня,
-    не изменяя счётчики.
+    Проверяет, есть ли вообще возможность сделать анализ:
+    - либо есть бесплатные на сегодня,
+    - либо есть купленные (paid_photos_balance > 0).
 
-    Используем при получении НОВОГО фото — до реального списания квоты.
+    Счётчики здесь не меняем — только смотрим.
     """
     telegram_id = message.from_user.id
     user = await get_or_create_user(telegram_id)
@@ -175,21 +234,28 @@ async def _check_daily_limit(message: Message, state: FSMContext) -> bool:
 
     today = date.today()
     used_analyses = await get_user_today_analyses(user.id, today)
+    if used_analyses is None:
+        used_analyses = 0
 
-    if used_analyses >= daily_limit:
-        await message.answer(
-            T.get("daily_limit_exceeded").format(limit=daily_limit)
-            + "\n"
-            + T.get("buy_additional_analyses").format(
-                number_of_analyses=PRICE_PER_ANALYSIS["number_of_analyses"],
-                price=PRICE_PER_ANALYSIS["price"],
-            ),
-            reply_markup=main_menu_kb(),
-        )
-        await state.set_state(UserStates.STANDARD)
-        return False
+    free_left = max(daily_limit - used_analyses, 0)
+    paid_balance = user.paid_photos_balance or 0
 
-    return True
+    # Есть хотя бы один доступный анализ — всё ок
+    if free_left > 0 or paid_balance > 0:
+        return True
+
+    # Нет ни бесплатных, ни платных — блокируем
+    await message.answer(
+        T.get("daily_limit_exceeded").format(limit=daily_limit)
+        + "\n"
+        + T.get("buy_additional_analyses").format(
+            number_of_analyses=PRICE_PER_ANALYSIS["number_of_analyses"],
+            price=PRICE_PER_ANALYSIS["price"],
+        ),
+        reply_markup=buy_more_analyses_inline_kb(),
+    )
+    await state.set_state(UserStates.STANDARD)
+    return False
 
 
 async def _run_analysis(
@@ -248,6 +314,7 @@ async def _run_analysis(
 # 1. Любое фото — старт анализа
 @router.message(F.photo)
 async def on_photo_received(message: Message, state: FSMContext):
+    # Сначала проверяем, есть ли вообще доступные анализы
     if not await _check_daily_limit(message, state):
         return
 
@@ -381,6 +448,15 @@ async def on_recipe_request(message: Message, state: FSMContext):
 # 4. Кнопка "Новое фото"
 @router.message(UserStates.PHOTO_COMMENT, F.text == B.get("new_photo"))
 async def on_new_photo(message: Message, state: FSMContext):
+    """
+    Запрашиваем новое фото.
+
+    Логика:
+      - сбрасываем состояние по текущему фото;
+      - проверяем, есть ли вообще доступные анализы (бесплатные или платные);
+      - если есть — просим прислать новое фото;
+      - если нет — показываем сообщение про лимит + кнопку покупки.
+    """
     await state.set_state(UserStates.PHOTO_COMMENT)
     await state.update_data(
         current_photo_file_id=None,
@@ -394,6 +470,7 @@ async def on_new_photo(message: Message, state: FSMContext):
         messages_count=0,
     )
 
+    # Переходим в стандартное состояние и смотрим лимиты
     await state.set_state(UserStates.STANDARD)
 
     telegram_id = message.from_user.id
@@ -404,18 +481,25 @@ async def on_new_photo(message: Message, state: FSMContext):
 
     today = date.today()
     used_analyses = await get_user_today_analyses(user.id, today)
+    if used_analyses is None:
+        used_analyses = 0
 
-    if used_analyses >= daily_limit:
+    free_left = max(daily_limit - used_analyses, 0)
+    paid_balance = user.paid_photos_balance or 0
+
+    if free_left <= 0 and paid_balance <= 0:
         await message.answer(
             T.get("daily_limit_exceeded").format(limit=daily_limit)
-            + "\n⭐️ "
+            + "\n"
             + T.get("buy_additional_analyses").format(
                 number_of_analyses=PRICE_PER_ANALYSIS["number_of_analyses"],
                 price=PRICE_PER_ANALYSIS["price"],
             ),
-            reply_markup=main_menu_kb(),
+            reply_markup=buy_more_analyses_inline_kb(),
         )
     else:
+        # Есть либо бесплатные, либо платные — можно просить новое фото
+        await state.set_state(UserStates.PHOTO_COMMENT)
         await message.answer(
             T.get("send_photo_for_analysis"),
             reply_markup=analysis_menu_kb(),

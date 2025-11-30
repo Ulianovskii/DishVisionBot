@@ -68,14 +68,6 @@ async def on_enter_promo(message: Message, state: FSMContext) -> None:
 async def on_promo_input(message: Message, state: FSMContext) -> None:
     """
     Обработка введённого промокода.
-
-    Особенности:
-    - пока мы в состоянии PROMO, нажатия кнопок — это тоже текст;
-      поэтому:
-        * "🏠 Главная" выкидывает в обычное главное меню;
-        * "Купить премиум на неделю/месяц" показывают заглушки
-          и тоже выходят из режима PROMO;
-        * всё остальное считаем строкой промокода.
     """
     text = (message.text or "").strip()
 
@@ -84,26 +76,6 @@ async def on_promo_input(message: Message, state: FSMContext) -> None:
         await state.set_state(UserStates.STANDARD)
         await message.answer(
             T.get("welcome_free"),
-            reply_markup=main_menu_kb(),
-        )
-        return
-
-    # 2) Пользователь нажал "Купить премиум на неделю" прямо из режима PROMO
-    if text == B.get("buy_week_confirm"):
-        await state.set_state(UserStates.STANDARD)
-        await message.answer(
-            T.get("premium_buy_stub_week")
-            or "Покупка премиума на неделю через Telegram Stars пока не реализована.",
-            reply_markup=main_menu_kb(),
-        )
-        return
-
-    # 3) Пользователь нажал "Купить премиум на месяц" прямо из режима PROMO
-    if text == B.get("buy_month_confirm"):
-        await state.set_state(UserStates.STANDARD)
-        await message.answer(
-            T.get("premium_buy_stub_month")
-            or "Покупка премиума на месяц через Telegram Stars пока не реализована.",
             reply_markup=main_menu_kb(),
         )
         return
@@ -149,16 +121,6 @@ async def on_promo_input(message: Message, state: FSMContext) -> None:
 async def _apply_promo_code(user_id: int, code: str) -> tuple[bool, str]:
     """
     Реализация бизнес-логики промокодов.
-
-    Правила:
-    - если пользователь в бане по промокодам → отказ;
-    - если промокод не найден / истёк / исчерпан по активациям → единый ответ (анти-брутфорс);
-    - если пользователь уже активировал этот промокод → отдельный ответ;
-    - при успехе:
-        * premium_until сдвигается вперёд на days (с учётом уже действующего премиума);
-        * is_premium = True;
-        * увеличиваем счётчик activations;
-        * создаём запись в PromoCodeActivation.
     """
     now = _now_utc()
 
@@ -225,8 +187,7 @@ async def _apply_promo_code(user_id: int, code: str) -> tuple[bool, str]:
         # 7. Применяем промокод → продлеваем премиум
         current_until = _normalize_to_utc(user.premium_until)
 
-        # Премиум стакается: если уже был активен — добавляем дни к текущему дедлайну,
-        # если истёк или не было — считаем от текущего момента.
+        # Премиум стакается
         base = now
         if current_until is not None and current_until > now:
             base = current_until
@@ -256,31 +217,3 @@ async def _apply_promo_code(user_id: int, code: str) -> tuple[bool, str]:
     ) or f"Промокод активирован! Премиум продлён до {until_str}."
 
     return True, success_msg
-
-
-# ===== Заглушки для кнопок покупки за звёзды (пока без реальной оплаты) =====
-
-@router.message(F.text == B.get("buy_week_confirm"))
-async def on_buy_week_stub(message: Message, state: FSMContext) -> None:
-    """
-    Пока покупка через Telegram Stars не реализована — честная заглушка.
-    """
-    await state.set_state(UserStates.STANDARD)
-    await message.answer(
-        T.get("premium_buy_stub_week")
-        or "Покупка премиума на неделю через Telegram Stars пока не реализована.",
-        reply_markup=main_menu_kb(),
-    )
-
-
-@router.message(F.text == B.get("buy_month_confirm"))
-async def on_buy_month_stub(message: Message, state: FSMContext) -> None:
-    """
-    Пока покупка через Telegram Stars не реализована — честная заглушка.
-    """
-    await state.set_state(UserStates.STANDARD)
-    await message.answer(
-        T.get("premium_buy_stub_month")
-        or "Покупка премиума на месяц через Telegram Stars пока не реализована.",
-        reply_markup=main_menu_kb(),
-    )

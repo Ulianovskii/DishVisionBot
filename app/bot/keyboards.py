@@ -1,17 +1,28 @@
 # app/bot/keyboards.py
 
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from app.locales.ru.buttons import RussianButtons as B
 
 
-# ===== Главное меню =====
+# ====================================================
+#                   ГЛАВНОЕ МЕНЮ
+# ====================================================
+
 def main_menu_kb() -> ReplyKeyboardMarkup:
+    """
+    Главное меню: Анализ, Профиль, Премиум, Помощь.
+    Убраны кнопки отчётов и плана калорий.
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=B.get("analyze_food"))],
             [
                 KeyboardButton(text=B.get("profile")),
-                KeyboardButton(text=B.get("reports")),
             ],
             [KeyboardButton(text=B.get("buy_premium"))],
             [KeyboardButton(text=B.get("help"))],
@@ -21,35 +32,61 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     )
 
 
-# ===== Меню анализа =====
-def analysis_menu_kb(disable_buttons=False) -> ReplyKeyboardMarkup:
+# ====================================================
+#                   МЕНЮ АНАЛИЗА
+# ====================================================
+
+def analysis_menu_kb(disable_buttons: bool = False) -> ReplyKeyboardMarkup:
+    """
+    Меню анализа (когда фото уже загружено).
+    """
     keyboard = []
 
     if not disable_buttons:
-        keyboard.append([
-            KeyboardButton(text=B.get("nutrition")),
-            KeyboardButton(text=B.get("recipe")),
-        ])
+        keyboard.append(
+            [
+                KeyboardButton(text=B.get("nutrition")),
+                KeyboardButton(text=B.get("recipe")),
+            ]
+        )
 
     keyboard.append([KeyboardButton(text=B.get("new_photo"))])
     keyboard.append([KeyboardButton(text=B.get("back"))])
 
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+    )
 
 
-# ===== Профиль =====
+# ====================================================
+#                   ПРОФИЛЬ (старое меню)
+# ====================================================
+
 def profile_menu_kb() -> ReplyKeyboardMarkup:
+    """
+    Оставлено только на будущее.
+    Сейчас НЕ используется — клавиатура профиля
+    формируется в build_profile_keyboard().
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=B.get("set_calorie_goal"))],
             [KeyboardButton(text=B.get("back"))],
         ],
         resize_keyboard=True,
     )
 
 
-# ===== Отчёты =====
+# ====================================================
+#                       ОТЧЁТЫ
+# ====================================================
+
 def reports_menu_kb() -> ReplyKeyboardMarkup:
+    """
+    Меню отчётов.
+    Сейчас недостижимо для пользователя, потому что
+    кнопка 'Отчеты' скрыта из главного меню.
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -63,8 +100,14 @@ def reports_menu_kb() -> ReplyKeyboardMarkup:
     )
 
 
-# ===== Премиум =====
+# ====================================================
+#               ПРЕМИУМ-ПОДПИСКА
+# ====================================================
+
 def premium_menu_kb() -> ReplyKeyboardMarkup:
+    """
+    Меню оформления премиума.
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -79,10 +122,29 @@ def premium_menu_kb() -> ReplyKeyboardMarkup:
 
 
 # ====================================================
-#                   АДМИНКА
+#           ИНЛАЙН-КЛАВИАТУРА ПОКУПКИ ЛИМИТОВ
 # ====================================================
 
-# Главное админ-меню
+def buy_more_analyses_inline_kb() -> InlineKeyboardMarkup:
+    """
+    Инлайн-кнопка для покупки дополнительного пакета анализов.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Купить 5 анализов ⭐",
+                    callback_data="buy_analyses_pack",
+                )
+            ]
+        ]
+    )
+
+
+# ====================================================
+#                       АДМИНКА
+# ====================================================
+
 def admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -95,11 +157,7 @@ def admin_menu_kb() -> ReplyKeyboardMarkup:
     )
 
 
-# Подменю — Управление лимитами
 def admin_limits_menu_kb() -> ReplyKeyboardMarkup:
-    """
-    Подменю 'Управление лимитами' в админке.
-    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=B.get("admin_limits_reset_me"))],
@@ -108,7 +166,6 @@ def admin_limits_menu_kb() -> ReplyKeyboardMarkup:
                 KeyboardButton(text=B.get("admin_premium_off_me")),
             ],
             [KeyboardButton(text=B.get("admin_limits_reset_other"))],
-            # ВАЖНО: отдельная кнопка для возврата в админ-меню, НЕ общий back
             [KeyboardButton(text=B.get("admin_limits_back"))],
         ],
         resize_keyboard=True,
