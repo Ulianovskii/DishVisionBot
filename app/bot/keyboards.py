@@ -1,5 +1,3 @@
-# app/bot/keyboards.py
-
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
@@ -16,15 +14,18 @@ from app.locales.ru.buttons import RussianButtons as B
 def main_menu_kb() -> ReplyKeyboardMarkup:
     """
     Главное меню: Анализ, Профиль, Премиум, Помощь.
-    Убраны кнопки отчётов и плана калорий.
+    Кнопки сгруппированы так, чтобы не занимать слишком много места по вертикали.
     """
     return ReplyKeyboardMarkup(
         keyboard=[
+            # Главная целевая кнопка — отдельной строкой
             [KeyboardButton(text=B.get("analyze_food"))],
+            # Профиль + Премиум в одной строке
             [
                 KeyboardButton(text=B.get("profile")),
+                KeyboardButton(text=B.get("buy_premium")),
             ],
-            [KeyboardButton(text=B.get("buy_premium"))],
+            # Помощь отдельной строкой внизу
             [KeyboardButton(text=B.get("help"))],
         ],
         resize_keyboard=True,
