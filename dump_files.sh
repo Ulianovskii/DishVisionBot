@@ -33,7 +33,7 @@ cd "$ROOT_DIR" || exit 1
 for path in "${TARGETS[@]}"; do
     if [ -d "$path" ]; then
         # Папка — выводим все файлы внутри (python + sql + yaml и т.п.)
-        find "$path" -type f \( -name "*.py" -o -name "*.sql" -o -name "*.yml" -o -name "*.yaml" -o -name "docker-compose.yml" \) | sort | while read -r file; do
+        find "$path" -type f \( -name "*.py" -o -name "*.sql" -o -name "*.yml" -o -name "*.yaml" \) | sort | while read -r file; do
             echo ""
             echo "===================="
             echo "=== FILE: $file ==="

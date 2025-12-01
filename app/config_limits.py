@@ -32,12 +32,12 @@ PREMIUM_TARIFF = TariffConfig(
 
 # ---- Цены премиума в звёздах ----
 
-STARS_PREMIUM_WEEK: int = 100
-STARS_PREMIUM_MONTH: int = 250
+STARS_PREMIUM_WEEK: int = 1 #100
+STARS_PREMIUM_MONTH: int = 2 #250
 
 
 PRICE_PER_ANALYSIS = {
-    "price": 20,  # Количество звезд
+    "price": 1,  # Количество звезд 20
     "number_of_analyses": 5  # Количество анализов, которое можно купить за эти звезды
 }
 
