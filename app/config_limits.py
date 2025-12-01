@@ -21,23 +21,23 @@ class TariffConfig:
 # ---- Тарифы ----
 
 FREE_TARIFF = TariffConfig(
-    daily_photos=2,          # Бесплатный: 5 фото/день
+    daily_photos=5,          # Бесплатный: 5 фото/день
     refinements_per_photo=2, # Бесплатный: 2 уточнения на фото
 )
 
 PREMIUM_TARIFF = TariffConfig(
-    daily_photos=4,         # Премиум: 15 фото/день
+    daily_photos=20,         # Премиум: 15 фото/день
     refinements_per_photo=5, # Премиум: 5 уточнений на фото
 )
 
 # ---- Цены премиума в звёздах ----
 
-STARS_PREMIUM_WEEK: int = 1
-STARS_PREMIUM_MONTH: int = 2
+STARS_PREMIUM_WEEK: int = 100
+STARS_PREMIUM_MONTH: int = 250
 
 
 PRICE_PER_ANALYSIS = {
-    "price": 1,  # Количество звезд
+    "price": 20,  # Количество звезд
     "number_of_analyses": 5  # Количество анализов, которое можно купить за эти звезды
 }
 
